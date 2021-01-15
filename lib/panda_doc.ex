@@ -30,20 +30,27 @@ defmodule PandaDoc do
 
   ## Examples
 
-  iex> fields = [%{initials: %{role: "user"}, signature: %{role: "user"}}]
+  iex> pdf_bytes = []
   iex> recipients = [%{email: "jane@example.com", first_name: "Jane", last_name: "Example", role: "user"}]
-  iex> PandaDoc.create_document("Sample PandaDoc PDF.pdf", <<pdf_bytes>>, recipients, fields, ["tag1", "tag2"])
+  iex> PandaDoc.create_document("Sample PandaDoc PDF.pdf", <<pdf_bytes>>, recipients)
   {:ok, "msFYActMfJHqNTKH8YSvF1"}
 
   """
-  def create_document(name, pdf_bytes, recipients, fields \\ [], tags \\ []) do
+  def create_document(
+        name,
+        pdf_bytes,
+        recipients,
+        fields \\ %{},
+        tags \\ [],
+        parse_form_fields \\ false
+      ) do
     json =
       %{
         name: name,
         tags: tags,
         fields: fields,
         recipients: recipients,
-        parse_form_fields: true
+        parse_form_fields: parse_form_fields
       }
       |> Poison.encode!()
 
@@ -90,6 +97,25 @@ defmodule PandaDoc do
   end
 
   @doc """
+  Get basic data about a document such as name, status, and dates.
+
+  ## Examples
+
+  iex> PandaDoc.document_status("msFYActMfJHqNTKH8YSvF1")
+  {:ok, %{}}
+
+  """
+  def document_status(id) do
+    case get("/documents/#{id}") do
+      {:ok, %Tesla.Env{body: %{id: _id, status: _status, uuid: _uuid} = info}} ->
+        {:ok, info}
+
+      error ->
+        format_error(error)
+    end
+  end
+
+  @doc """
   Generate a link to share this document.
 
   ## Examples
@@ -120,7 +146,7 @@ defmodule PandaDoc do
   ## Examples
 
   iex> PandaDoc.download_document("msFYActMfJHqNTKH8YSvF1", watermark_text: "WATERMARKED")
-  {:ok, <<pdf_bytes>>}
+  {:ok, []}
 
   """
   def download_document(id, query \\ []) do
@@ -139,7 +165,7 @@ defmodule PandaDoc do
   ## Examples
 
   iex> PandaDoc.download_protected_document("msFYActMfJHqNTKH8YSvF1")
-  {:ok, <<pdf_bytes>>}
+  {:ok, []}
 
   """
   def download_protected_document(id, hard_copy_type \\ nil) do
@@ -181,7 +207,7 @@ defmodule PandaDoc do
 
   ## Examples
 
-  iex> PandaDoc.list_documents(query)
+  iex> PandaDoc.list_documents()
   {:ok,
     [
       %{
@@ -190,7 +216,7 @@ defmodule PandaDoc do
         status: "document.draft",
         date_created: "2017-08-06T08:42:13.836022Z",
         date_modified: "2017-09-04T02:21:13.963750Z",
-        expiration_date: null,
+        expiration_date: nil,
         version: "1"
       }
     ]
