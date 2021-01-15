@@ -20,7 +20,7 @@ defmodule PandaDoc do
   defp format_error({:ok, %Tesla.Env{status: status, body: %{user_msg: message}}}),
     do: {:error, status, message}
 
-  defp format_error({:ok, %Tesla.Env{status: status, body: body} = env}),
+  defp format_error({:ok, %Tesla.Env{status: status, body: body}}),
     do: {:error, status, body}
 
   defp format_error({:error, _} = error), do: error
