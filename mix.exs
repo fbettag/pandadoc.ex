@@ -6,7 +6,7 @@ defmodule PandaDoc.MixProject do
   def project do
     [
       app: :pandadoc,
-      version: "0.1.0",
+      version: "0.1.1",
       elixir: "~> 1.10",
       source_url: @project_url,
       homepage_url: @project_url,

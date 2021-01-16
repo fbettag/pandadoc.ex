@@ -1,6 +1,6 @@
 # PandaDoc
 
-**TODO: Add description**
+Provides an Elixir API to digitally signing documents using pandadoc.com.
 
 ## Installation
 
@@ -10,9 +10,15 @@ by adding `pandadoc` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:pandadoc, "~> 0.1.0"}
+    {:pandadoc, "~> 0.1.1"}
   ]
 end
+```
+
+## Configuration
+
+```elixir
+config :pandadoc, api_key: "<your api key>"
 ```
 
 Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
