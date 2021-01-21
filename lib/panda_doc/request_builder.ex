@@ -123,8 +123,9 @@ defmodule PandaDoc.RequestBuilder do
 
   ## Returns
 
-  {:ok, struct} on success
-  {:error, term} on failure
+  `{:ok, struct()}` on success
+  `{:ok, Tesla.Env.t()}` on failure
+  `{:error, term}` on failure
   """
   @spec decode(Tesla.Env.t() | term(), false | struct() | [struct()]) ::
           {:ok, struct()} | {:ok, Tesla.Env.t()} | {:error, any}
@@ -143,8 +144,9 @@ defmodule PandaDoc.RequestBuilder do
 
   ## Returns
 
-  {:ok, struct} on success
-  {:error, term} on failure
+  `{:ok, struct}` on success
+  `{:ok, Tesla.Env.t()}` on failure
+  `{:error, term}` on failure
   """
   @spec evaluate_response({:error, any()} | {:atom, Tesla.Env.t()}, list()) ::
           {:ok, struct()} | {:ok, Tesla.Env.t()} | {:error, any}

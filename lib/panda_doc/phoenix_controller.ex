@@ -24,18 +24,34 @@ defmodule PandaDoc.PhoenixController do
 
   """
 
+  @doc """
+  Triggers when a PandaDoc document changed.
+  """
+  @callback handle_document_change(String.t(), String.t(), map()) :: any()
+
+  @doc """
+  Triggers when a PandaDoc document has been completed/signed.
+  """
+  @callback handle_document_complete(String.t(), binary(), String.t(), map()) :: any()
+
   defmacro __using__(_) do
     quote do
+      @moduledoc "Implements a PhoenixController with callbacks for PandaDoc."
+      @behaviour PandaDoc.PhoenixController
       require Logger
+      use Phoenix.Controller
+      alias Plug.Conn
 
       @doc "default webhook that should match."
+      @spec webhook(Conn.t(), map()) :: Conn.t()
       def webhook(conn, %{"_json" => data}) do
         Enum.each(data, &parse_document/1)
-        send_resp(conn, 200, "")
+        Conn.send_resp(conn, 200, "")
       end
 
       @doc "fallback webhook that should not match."
-      def webhook(conn, _), do: send_resp(conn, 406, "")
+      @spec webhook(Conn.t(), map()) :: Conn.t()
+      def webhook(conn, _), do: Conn.send_resp(conn, 406, "")
 
       # parsing valid document state changes
       defp parse_document(%{
@@ -49,6 +65,7 @@ defmodule PandaDoc.PhoenixController do
         spawn(fn ->
           case status do
             "document.completed" ->
+              pdf = download_data(id)
               handle_document_complete(id, pdf, status, details)
 
             _ ->
@@ -73,7 +90,7 @@ defmodule PandaDoc.PhoenixController do
 
           id
           |> PandaDoc.download_document()
-          |> ok_data()
+          |> ok_data(id)
         end
       end
 

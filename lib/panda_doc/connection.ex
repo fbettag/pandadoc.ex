@@ -11,11 +11,12 @@ defmodule PandaDoc.Connection do
     [
       {Tesla.Middleware.BaseUrl, "https://api.pandadoc.com/public/v1"},
       {Tesla.Middleware.Timeout, timeout: 30_000},
-      {Tesla.Middleware.JSON, engine: Poison, engine_opts: [keys: :atoms]},
+      {Tesla.Middleware.EncodeJson, engine: Poison, engine_opts: [keys: :atoms]},
       {Tesla.Middleware.Headers,
        [
          {"User-Agent", "Elixir"},
-         {"Authorization", "API-Key #{api_key}"}
+         {"Authorization", "API-Key #{api_key}"},
+         {"Content-Type", "application/json"}
        ]}
     ]
     |> Tesla.client()

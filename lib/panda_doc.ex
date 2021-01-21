@@ -22,6 +22,34 @@ defmodule PandaDoc do
   config :pandadoc, api_key: "<your api key>"
   ```
 
+  ## WebHooks in Phoenix
+
+  Put the following lines in a file called `pandadoc_controller.ex` inside your controllers directory.
+
+  ```elixir
+  defmodule YourAppWeb.PandaDocController do
+    use PandaDoc.PhoenixController
+
+    def handle_document_change(id, status, _details) do
+      id
+      |> Documents.get_by_pandadoc_id!()
+      |> Documents.update_document(%{status: status})
+    end
+
+    def handle_document_complete(id, pdf, status, _details) do
+      id
+      |> Documents.get_by_pandadoc_id!()
+      |> Documents.update_document(%{data: pdf, status: status})
+    end
+  end
+  ```
+
+  Put the following lines into your `router.ex` and configure the WebHook in the pandadoc portal.
+
+  ```elixir
+    post "/callbacks/pandadoc", YourAppWeb.PandaDocController, :webhook
+  ```
+
   ## Usage
 
       iex> recipients = [
@@ -56,19 +84,20 @@ defmodule PandaDoc do
         name: %PandaDoc.Model.Field{value: "John", role: "signer1"}
       }
       iex> PandaDoc.create_document("Sample PandaDoc PDF.pdf", pdf_bytes, recipients, fields, ["tag1"])
-      {:ok, %PandaDoc.Model.BasicDocumentResponse{id: "msFYActMfJHqNTKH8YSvF1", status: "document.uploaded"}}
+      {:ok, "msFYActMfJHqNTKH8YSvF1"}
 
   """
   @spec create_document(
           String.t(),
           binary(),
           list(Model.Recipient.t()),
-          map(),
+          map() | nil,
           list(String.t()) | nil,
           boolean() | nil,
           Tesla.Env.client() | nil
         ) ::
-          {:ok, Model.BasicDocumentResponse.t()}
+          {:ok, String.t()}
+          | {:ok, Model.BasicDocumentResponse.t()}
           | {:ok, Model.ErrorResponse.t()}
           | {:error, Tesla.Env.t()}
   def create_document(
@@ -98,18 +127,21 @@ defmodule PandaDoc do
         headers: [{"content-type", "application/pdf"}]
       )
 
-    %{}
-    |> method(:post)
-    |> url("/documents")
-    |> add_param(:body, :body, mp)
-    |> Enum.into([])
-    |> (&client.request(client, &1)).()
-    |> evaluate_response([
-      {200, %Model.BasicDocumentResponse{}},
-      {400, %Model.ErrorResponse{}},
-      {403, %Model.ErrorResponse{}},
-      {500, %Model.ErrorResponse{}}
-    ])
+    with {:ok, %Model.BasicDocumentResponse{id: id}} <-
+           %{}
+           |> method(:post)
+           |> url("/documents")
+           |> add_param(:body, :body, mp)
+           |> Enum.into([])
+           |> (&Tesla.request(client, &1)).()
+           |> evaluate_response([
+             {201, %Model.BasicDocumentResponse{}},
+             {400, %Model.ErrorResponse{}},
+             {403, %Model.ErrorResponse{}},
+             {500, %Model.ErrorResponse{}}
+           ]) do
+      {:ok, id}
+    end
   end
 
   @doc """
@@ -138,26 +170,20 @@ defmodule PandaDoc do
         silent \\ false,
         client \\ Connection.new()
       ) do
-    json =
-      %{
-        subject: subject,
-        message: message,
-        silent: silent
-      }
-      |> Poison.encode!()
+    json = %{
+      subject: subject,
+      message: message,
+      silent: silent
+    }
 
     %{}
     |> method(:post)
     |> url("/documents/#{id}/send")
     |> add_param(:body, :body, json)
     |> Enum.into([])
-    |> (&client.request(client, &1)).()
+    |> (&Tesla.request(client, &1)).()
     |> evaluate_response([
-      {200, %Model.BasicDocumentResponse{}},
-      {400, %Model.ErrorResponse{}},
-      {403, %Model.ErrorResponse{}},
-      {404, %Model.ErrorResponse{}},
-      {500, %Model.ErrorResponse{}}
+      {200, %Model.BasicDocumentResponse{}}
     ])
   end
 
@@ -179,7 +205,7 @@ defmodule PandaDoc do
     |> method(:get)
     |> url("/documents/#{id}")
     |> Enum.into([])
-    |> (&client.request(client, &1)).()
+    |> (&Tesla.request(client, &1)).()
     |> evaluate_response([
       {200, %Model.BasicDocumentResponse{}},
       {400, %Model.ErrorResponse{}},
@@ -207,7 +233,7 @@ defmodule PandaDoc do
     |> method(:get)
     |> url("/documents/#{id}/details")
     |> Enum.into([])
-    |> (&client.request(client, &1)).()
+    |> (&Tesla.request(client, &1)).()
     |> evaluate_response([
       {200, %Model.DocumentResponse{}},
       {400, %Model.ErrorResponse{}},
@@ -218,39 +244,40 @@ defmodule PandaDoc do
   end
 
   @doc """
-  Generates an ID for the given recipient that you can just append to https://app.pandadoc.com/s/ with a validity of `lifetime` seconds (86400 by default).
+  Generates a link for the given recipient that you can just email or iframe with a validity of `lifetime` seconds (86400 by default).
 
   ## Examples
 
       iex> PandaDoc.share_document("msFYActMfJHqNTKH8YSvF1", "jane@example.com", 900)
-      {:ok, %PandaDoc.Model.BasicDocumentResponse{id: "msFYActMfJHqNTKH8YSvF1", status: "document.sent", expires_at: ~U[2017-08-29T22:18:44.315Z]}}
+      {:ok, "https://app.pandadoc.com/s/msFYActMfJHqNTKH8YSvF1", expires_at: ~U[2017-08-29T22:18:44.315Z]}
 
   """
   @spec share_document(String.t(), String.t(), integer() | nil, Tesla.Env.client() | nil) ::
-          {:ok, Model.BasicDocumentResponse.t()}
+          {:ok, String.t(), DateTime.t()}
           | {:ok, Model.ErrorResponse.t()}
           | {:error, Tesla.Env.t()}
   def share_document(id, recipient_email, lifetime \\ 86_400, client \\ Connection.new()) do
-    json =
-      %{
-        recipient: recipient_email,
-        lifetime: lifetime
-      }
-      |> Poison.encode!()
+    json = %{
+      recipient: recipient_email,
+      lifetime: lifetime
+    }
 
-    %{}
-    |> method(:post)
-    |> url("/documents/#{id}/session")
-    |> add_param(:body, :body, json)
-    |> Enum.into([])
-    |> (&client.request(client, &1)).()
-    |> evaluate_response([
-      {200, %Model.BasicDocumentResponse{}},
-      {400, %Model.ErrorResponse{}},
-      {403, %Model.ErrorResponse{}},
-      {404, %Model.ErrorResponse{}},
-      {500, %Model.ErrorResponse{}}
-    ])
+    with {:ok, %Model.BasicDocumentResponse{id: share_id, expires_at: expires_at}} <-
+           %{}
+           |> method(:post)
+           |> url("/documents/#{id}/session")
+           |> add_param(:body, :body, json)
+           |> Enum.into([])
+           |> (&Tesla.request(client, &1)).()
+           |> evaluate_response([
+             {201, %Model.BasicDocumentResponse{}},
+             {400, %Model.ErrorResponse{}},
+             {403, %Model.ErrorResponse{}},
+             {404, %Model.ErrorResponse{}},
+             {500, %Model.ErrorResponse{}}
+           ]) do
+      {:ok, "https://app.pandadoc.com/s/#{share_id}", expires_at}
+    end
   end
 
   @doc """
@@ -277,7 +304,7 @@ defmodule PandaDoc do
     |> url("/documents/#{id}/download")
     |> add_optional_params(optional_params, query)
     |> Enum.into([])
-    |> (&client.request(client, &1)).()
+    |> (&Tesla.request(client, &1)).()
     |> evaluate_response([
       {200, :bytes},
       {400, %Model.ErrorResponse{}},
@@ -312,7 +339,7 @@ defmodule PandaDoc do
     |> url("/documents/#{id}/download-protected")
     |> add_optional_params(optional_params, query)
     |> Enum.into([])
-    |> (&client.request(client, &1)).()
+    |> (&Tesla.request(client, &1)).()
     |> evaluate_response([
       {200, :bytes},
       {400, %Model.ErrorResponse{}},
@@ -338,7 +365,7 @@ defmodule PandaDoc do
     |> method(:delete)
     |> url("/documents/#{id}")
     |> Enum.into([])
-    |> (&client.request(client, &1)).()
+    |> (&Tesla.request(client, &1)).()
     |> evaluate_response([
       {204, :ok},
       {400, %Model.ErrorResponse{}},
@@ -379,7 +406,7 @@ defmodule PandaDoc do
     |> url("/documents")
     |> add_optional_params(optional_params, query)
     |> Enum.into([])
-    |> (&client.request(client, &1)).()
+    |> (&Tesla.request(client, &1)).()
     |> evaluate_response([
       {200, %Model.DocumentListResponse{}},
       {400, %Model.ErrorResponse{}},
