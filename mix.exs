@@ -6,17 +6,20 @@ defmodule PandaDoc.MixProject do
   def project do
     [
       app: :pandadoc,
-      version: "0.1.1",
-      elixir: "~> 1.10",
+      version: "0.1.2",
+      elixir: "~> 1.7",
       source_url: @project_url,
       homepage_url: @project_url,
       name: "pandadoc.com API",
-      description:
-        "This package implements the free document signing API provided by pandadoc.com",
+      description: "Implements the free document signing API provided by pandadoc.com",
       build_embedded: Mix.env() == :prod,
       start_permanent: Mix.env() == :prod,
       package: package(),
-      deps: deps()
+      aliases: aliases(),
+      deps: deps(),
+      dialyzer: [
+        plt_add_deps: :apps_direct
+      ]
     ]
   end
 
@@ -25,14 +28,13 @@ defmodule PandaDoc.MixProject do
       name: "pandadoc",
       maintainers: ["Franz Bettag"],
       licenses: ["MIT"],
-      links: %{"GitHub" => @project_url}
+      links: %{"GitHub" => @project_url},
+      files: ~w(lib LICENSE README.md mix.exs)
     ]
   end
 
-  def application do
-    [
-      extra_applications: [:logger]
-    ]
+  defp aliases do
+    [credo: "credo -a --strict"]
   end
 
   defp deps do
@@ -40,9 +42,14 @@ defmodule PandaDoc.MixProject do
       {:tesla, "~> 1.4"},
       {:poison, "~> 4.0"},
       {:ex_doc, "~> 0.19", only: :dev},
-      {:credo, github: "rrrene/credo", only: [:dev, :test]},
       {:doctor, "~> 0.17.0", only: :dev},
+      {:dialyxir, "~> 1.0", only: [:dev], runtime: false},
+      {:credo, github: "rrrene/credo", only: [:dev, :test]},
       {:git_hooks, "~> 0.4.0", only: [:test, :dev], runtime: false}
     ]
+  end
+
+  def application do
+    [extra_applications: [:logger]]
   end
 end

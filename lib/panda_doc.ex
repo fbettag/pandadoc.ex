@@ -4,25 +4,43 @@ defmodule PandaDoc do
 
   ## Installation
 
-  If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-  by adding `pandadoc` to your list of dependencies in `mix.exs`:
+  This package can be installed by adding `pandadoc` to your list of dependencies in `mix.exs`:
 
   ```elixir
   def deps do
     [
-      {:pandadoc, "~> 0.1.1"}
+      {:pandadoc, "~> 0.1.2"}
     ]
   end
   ```
 
   ## Configuration
 
+  Put the following lines into your `config.exs` or better, into your environment configuration files like `test.exs`, `dev.exs` or `prod.exs.`.
+
   ```elixir
   config :pandadoc, api_key: "<your api key>"
   ```
 
+  ## Usage
+
+      iex> recipients = [
+        %PandaDoc.Recipient{
+          email: "jane@example.com",
+          first_name: "Jane",
+          last_name: "Example",
+          role: "signer1"
+        }
+      ]
+
+      iex> PandaDoc.create_document("Sample PandaDoc PDF.pdf", [] = pdf_bytes, recipients)
+      {:ok, "msFYActMfJHqNTKH8YSvF1"}
+
+
   """
-  alias PandaDoc.Client
+  import PandaDoc.RequestBuilder
+  alias PandaDoc.Connection
+  alias PandaDoc.Model
   alias Tesla.Multipart
 
   @doc """
@@ -30,21 +48,37 @@ defmodule PandaDoc do
 
   ## Examples
 
+      iex> pdf_bytes = File.read("/path/to/my.pdf")
       iex> recipients = [
-        %{email: "jane@example.com", first_name: "Jane", last_name: "Example", role: "signer1"}
+        %PandaDoc.Model.Recipient{email: "jane@example.com", first_name: "Jane", last_name: "Example", role: "signer1"}
       ]
-
-      iex> PandaDoc.create_document("Sample PandaDoc PDF.pdf", [] = pdf_bytes, recipients)
-      {:ok, "msFYActMfJHqNTKH8YSvF1"}
+      iex> fields = %{
+        name: %PandaDoc.Model.Field{value: "John", role: "signer1"}
+      }
+      iex> PandaDoc.create_document("Sample PandaDoc PDF.pdf", pdf_bytes, recipients, fields, ["tag1"])
+      {:ok, %PandaDoc.Model.BasicDocumentResponse{id: "msFYActMfJHqNTKH8YSvF1", status: "document.uploaded"}}
 
   """
+  @spec create_document(
+          String.t(),
+          binary(),
+          list(Model.Recipient.t()),
+          map(),
+          list(String.t()) | nil,
+          boolean() | nil,
+          Tesla.Env.client() | nil
+        ) ::
+          {:ok, Model.BasicDocumentResponse.t()}
+          | {:ok, Model.ErrorResponse.t()}
+          | {:error, Tesla.Env.t()}
   def create_document(
         name,
         pdf_bytes,
         recipients,
         fields \\ %{},
         tags \\ [],
-        parse_form_fields \\ false
+        parse_form_fields \\ false,
+        client \\ Connection.new()
       ) do
     json =
       %{
@@ -64,13 +98,18 @@ defmodule PandaDoc do
         headers: [{"content-type", "application/pdf"}]
       )
 
-    case Client.post("/documents", mp) do
-      {:ok, %Tesla.Env{body: %{id: id, status: "document.uploaded", uuid: _uuid}}} ->
-        {:ok, id}
-
-      error ->
-        Client.format_error(error)
-    end
+    %{}
+    |> method(:post)
+    |> url("/documents")
+    |> add_param(:body, :body, mp)
+    |> Enum.into([])
+    |> (&client.request(client, &1)).()
+    |> evaluate_response([
+      {200, %Model.BasicDocumentResponse{}},
+      {400, %Model.ErrorResponse{}},
+      {403, %Model.ErrorResponse{}},
+      {500, %Model.ErrorResponse{}}
+    ])
   end
 
   @doc """
@@ -79,23 +118,47 @@ defmodule PandaDoc do
   ## Examples
 
       iex> PandaDoc.send_document("msFYActMfJHqNTKH8YSvF1", "Document ready", "Hi there, please sign this document")
-      :ok
+      {:ok, %PandaDoc.Model.BasicDocumentResponse{id: "msFYActMfJHqNTKH8YSvF1", status: "document.sent"}}
 
   """
-  def send_document(id, subject \\ nil, message \\ nil, silent \\ false) do
-    json = %{
-      subject: subject,
-      message: message,
-      silent: silent
-    }
+  @spec send_document(
+          String.t(),
+          String.t() | nil,
+          String.t() | nil,
+          boolean() | nil,
+          Tesla.Env.client() | nil
+        ) ::
+          {:ok, Model.BasicDocumentResponse.t()}
+          | {:ok, Model.ErrorResponse.t()}
+          | {:error, Tesla.Env.t()}
+  def send_document(
+        id,
+        subject \\ nil,
+        message \\ nil,
+        silent \\ false,
+        client \\ Connection.new()
+      ) do
+    json =
+      %{
+        subject: subject,
+        message: message,
+        silent: silent
+      }
+      |> Poison.encode!()
 
-    case Client.post("/documents/#{id}/send", json) do
-      {:ok, %Tesla.Env{body: %{id: _id, status: "document.sent", uuid: _uuid}}} ->
-        :ok
-
-      error ->
-        Client.format_error(error)
-    end
+    %{}
+    |> method(:post)
+    |> url("/documents/#{id}/send")
+    |> add_param(:body, :body, json)
+    |> Enum.into([])
+    |> (&client.request(client, &1)).()
+    |> evaluate_response([
+      {200, %Model.BasicDocumentResponse{}},
+      {400, %Model.ErrorResponse{}},
+      {403, %Model.ErrorResponse{}},
+      {404, %Model.ErrorResponse{}},
+      {500, %Model.ErrorResponse{}}
+    ])
   end
 
   @doc """
@@ -104,52 +167,90 @@ defmodule PandaDoc do
   ## Examples
 
       iex> PandaDoc.document_status("msFYActMfJHqNTKH8YSvF1")
-      {:ok,
-        %{
-          id: "msFYActMfJHqNTKH8YSvF1",
-          name: "Sample Document",
-          status: "document.draft",
-          date_created: "2017-08-06T08:42:13.836022Z",
-          date_modified: "2017-09-04T02:21:13.963750Z",
-          expiration_date: nil,
-          version: "1"
-        }
-      }
+      {:ok, %PandaDoc.Model.BasicDocumentResponse{id: "msFYActMfJHqNTKH8YSvF1", status: "document.waiting_approval"}}
 
   """
-  def document_status(id) do
-    case Client.get("/documents/#{id}") do
-      {:ok, %Tesla.Env{body: %{id: _id, status: _status, uuid: _uuid} = info}} ->
-        {:ok, info}
-
-      error ->
-        Client.format_error(error)
-    end
+  @spec document_status(String.t(), Tesla.Env.client() | nil) ::
+          {:ok, Model.BasicDocumentResponse.t()}
+          | {:ok, Model.ErrorResponse.t()}
+          | {:error, Tesla.Env.t()}
+  def document_status(id, client \\ Connection.new()) do
+    %{}
+    |> method(:get)
+    |> url("/documents/#{id}")
+    |> Enum.into([])
+    |> (&client.request(client, &1)).()
+    |> evaluate_response([
+      {200, %Model.BasicDocumentResponse{}},
+      {400, %Model.ErrorResponse{}},
+      {403, %Model.ErrorResponse{}},
+      {404, %Model.ErrorResponse{}},
+      {500, %Model.ErrorResponse{}}
+    ])
   end
 
   @doc """
-  Generate a link to share this document with a default expiry of one day.
+  Get detailed data about a document such as name, status, dates, fields, metadata and much more.
+
+  ## Examples
+
+      iex> PandaDoc.document_details("msFYActMfJHqNTKH8YSvF1")
+      {:ok, %PandaDoc.Model.DocumentResponse{id: "msFYActMfJHqNTKH8YSvF1", status: "document.waiting_approval"}}
+
+  """
+  @spec document_details(String.t(), Tesla.Env.client() | nil) ::
+          {:ok, Model.DocumentResponse.t()}
+          | {:ok, Model.ErrorResponse.t()}
+          | {:error, Tesla.Env.t()}
+  def document_details(id, client \\ Connection.new()) do
+    %{}
+    |> method(:get)
+    |> url("/documents/#{id}/details")
+    |> Enum.into([])
+    |> (&client.request(client, &1)).()
+    |> evaluate_response([
+      {200, %Model.DocumentResponse{}},
+      {400, %Model.ErrorResponse{}},
+      {403, %Model.ErrorResponse{}},
+      {404, %Model.ErrorResponse{}},
+      {500, %Model.ErrorResponse{}}
+    ])
+  end
+
+  @doc """
+  Generates an ID for the given recipient that you can just append to https://app.pandadoc.com/s/ with a validity of `lifetime` seconds (86400 by default).
 
   ## Examples
 
       iex> PandaDoc.share_document("msFYActMfJHqNTKH8YSvF1", "jane@example.com", 900)
-      {:ok, "https://app.pandadoc.com/s/QYCPtavst3DqqBK72ZRtbF", ~U[2017-08-29T22:18:44.315Z]}
+      {:ok, %PandaDoc.Model.BasicDocumentResponse{id: "msFYActMfJHqNTKH8YSvF1", status: "document.sent", expires_at: ~U[2017-08-29T22:18:44.315Z]}}
 
   """
-  def share_document(id, recipient_email, lifetime \\ 86_400) do
-    json = %{
-      recipient: recipient_email,
-      lifetime: lifetime
-    }
+  @spec share_document(String.t(), String.t(), integer() | nil, Tesla.Env.client() | nil) ::
+          {:ok, Model.BasicDocumentResponse.t()}
+          | {:ok, Model.ErrorResponse.t()}
+          | {:error, Tesla.Env.t()}
+  def share_document(id, recipient_email, lifetime \\ 86_400, client \\ Connection.new()) do
+    json =
+      %{
+        recipient: recipient_email,
+        lifetime: lifetime
+      }
+      |> Poison.encode!()
 
-    case Client.post("/documents/#{id}/session", json) do
-      {:ok, %Tesla.Env{body: %{id: id, expires_at: expires_at}}} ->
-        {:ok, expires_at, _} = DateTime.from_iso8601(expires_at)
-        {:ok, "https://app.pandadoc.com/s/#{id}", expires_at}
-
-      error ->
-        Client.format_error(error)
-    end
+    %{}
+    |> method(:post)
+    |> url("/documents/#{id}/session")
+    |> add_param(:body, :body, json)
+    |> Enum.into([])
+    |> (&client.request(client, &1)).()
+    |> evaluate_response([
+      {200, %Model.BasicDocumentResponse{}},
+      {400, %Model.ErrorResponse{}},
+      {403, %Model.ErrorResponse{}},
+      {404, %Model.ErrorResponse{}},
+      {500, %Model.ErrorResponse{}}
+    ])
   end
 
   @doc """
@@ -161,14 +262,29 @@ defmodule PandaDoc do
       {:ok, []}
 
   """
-  def download_document(id, query \\ []) do
-    case Client.get("/documents/#{id}/download", query: query) do
-      {:ok, %Tesla.Env{body: pdf_bytes}} ->
-        {:ok, pdf_bytes}
+  @spec download_document(String.t(), keyword(String.t()) | nil, Tesla.Env.client() | nil) ::
+          {:ok, binary()} | {:ok, Model.ErrorResponse.t()} | {:error, Tesla.Env.t()}
+  def download_document(id, query \\ [], client \\ Connection.new()) do
+    optional_params = %{
+      :watermark_text => :query,
+      :watermark_color => :query,
+      :watermark_font_size => :query,
+      :watermark_opacity => :query
+    }
 
-      error ->
-        Client.format_error(error)
-    end
+    %{}
+    |> method(:get)
+    |> url("/documents/#{id}/download")
+    |> add_optional_params(optional_params, query)
+    |> Enum.into([])
+    |> (&client.request(client, &1)).()
+    |> evaluate_response([
+      {200, :bytes},
+      {400, %Model.ErrorResponse{}},
+      {403, %Model.ErrorResponse{}},
+      {404, %Model.ErrorResponse{}},
+      {500, %Model.ErrorResponse{}}
+    ])
   end
 
   @doc """
@@ -180,19 +296,30 @@ defmodule PandaDoc do
       {:ok, []}
 
   """
-  def download_protected_document(id, hard_copy_type \\ nil) do
-    query =
-      if hard_copy_type == nil,
-        do: [],
-        else: [hard_copy_type: hard_copy_type]
+  @spec download_protected_document(
+          String.t(),
+          keyword(String.t()) | nil,
+          Tesla.Env.client() | nil
+        ) ::
+          {:ok, binary()} | {:ok, Model.ErrorResponse.t()} | {:error, Tesla.Env.t()}
+  def download_protected_document(id, query \\ [], client \\ Connection.new()) do
+    optional_params = %{
+      :hard_copy_type => :query
+    }
 
-    case Client.get("/documents/#{id}/download-protected", query: query) do
-      {:ok, %Tesla.Env{body: pdf_bytes}} ->
-        {:ok, pdf_bytes}
-
-      error ->
-        Client.format_error(error)
-    end
+    %{}
+    |> method(:get)
+    |> url("/documents/#{id}/download-protected")
+    |> add_optional_params(optional_params, query)
+    |> Enum.into([])
+    |> (&client.request(client, &1)).()
+    |> evaluate_response([
+      {200, :bytes},
+      {400, %Model.ErrorResponse{}},
+      {403, %Model.ErrorResponse{}},
+      {404, %Model.ErrorResponse{}},
+      {500, %Model.ErrorResponse{}}
+    ])
   end
 
   @doc """
@@ -204,14 +331,21 @@ defmodule PandaDoc do
       :ok
 
   """
-  def delete_document(id) do
-    case Client.delete("/documents/#{id}") do
-      {:ok, %Tesla.Env{status: 204}} ->
-        :ok
-
-      error ->
-        Client.format_error(error)
-    end
+  @spec delete_document(String.t(), Tesla.Env.client() | nil) ::
+          {:ok, :atom} | {:ok, Model.ErrorResponse.t()} | {:error, Tesla.Env.t()}
+  def delete_document(id, client \\ Connection.new()) do
+    %{}
+    |> method(:delete)
+    |> url("/documents/#{id}")
+    |> Enum.into([])
+    |> (&client.request(client, &1)).()
+    |> evaluate_response([
+      {204, :ok},
+      {400, %Model.ErrorResponse{}},
+      {403, %Model.ErrorResponse{}},
+      {404, %Model.ErrorResponse{}},
+      {500, %Model.ErrorResponse{}}
+    ])
   end
 
   @doc """
@@ -220,28 +354,38 @@ defmodule PandaDoc do
   ## Examples
 
       iex> PandaDoc.list_documents()
-      {:ok,
-        [
-          %{
-            id: "msFYActMfJHqNTKH8YSvF1",
-            name: "Sample Document",
-            status: "document.draft",
-            date_created: "2017-08-06T08:42:13.836022Z",
-            date_modified: "2017-09-04T02:21:13.963750Z",
-            expiration_date: nil,
-            version: "1"
-          }
-        ]
-      }
+      {:ok, %Model.DocumentListResponse{results: [%Model.BasicDocumentResponse{}]}}
 
   """
-  def list_documents(query \\ []) do
-    case Client.get("/documents", query: query) do
-      {:ok, %Tesla.Env{body: %{results: results}}} ->
-        {:ok, results}
+  @spec list_documents(keyword(String.t()) | nil, Tesla.Env.client() | nil) ::
+          {:ok, Model.DocumentListResponse.t()}
+          | {:ok, Model.ErrorResponse.t()}
+          | {:error, Tesla.Env.t()}
+  def list_documents(query \\ [], client \\ Connection.new()) do
+    optional_params = %{
+      :q => :query,
+      :tag => :query,
+      :status => :query,
+      :count => :query,
+      :page => :query,
+      :deleted => :query,
+      :id => :query,
+      :template_id => :query,
+      :folder_uuid => :query
+    }
 
-      error ->
-        Client.format_error(error)
-    end
+    %{}
+    |> method(:get)
+    |> url("/documents")
+    |> add_optional_params(optional_params, query)
+    |> Enum.into([])
+    |> (&client.request(client, &1)).()
+    |> evaluate_response([
+      {200, %Model.DocumentListResponse{}},
+      {400, %Model.ErrorResponse{}},
+      {403, %Model.ErrorResponse{}},
+      {404, %Model.ErrorResponse{}},
+      {500, %Model.ErrorResponse{}}
+    ])
   end
 end
