@@ -22,6 +22,12 @@ defmodule PandaDoc.PhoenixController do
   end
   ```
 
+  Put the following lines into your `router.ex` and configure the WebHook in the pandadoc portal.
+
+  ```elixir
+    post "/callbacks/pandadoc", YourAppWeb.PandaDocController, :webhook
+  ```
+
   """
 
   @doc """
