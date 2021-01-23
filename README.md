@@ -10,15 +10,13 @@ This package can be installed by adding `pandadoc` to your list of dependencies 
 
 ```elixir
 def deps do
-  [
-    {:pandadoc, "~> 0.1.2"}
-  ]
+  [{:pandadoc, "~> 0.1.2"}]
 end
 ```
 
 ## Configuration
 
-Put the following lines into your `config.exs` or better, into your environment configuration files like `test.exs`, `dev.exs` or `prod.exs.`.
+Put the following lines into your `config.exs` or better, into your environment configuration files like `test.exs`, `dev.exs` or `prod.exs`.
 
 ```elixir
 config :pandadoc, api_key: "<your api key>"
